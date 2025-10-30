@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-import httpx
+try:
+    import orjson as json
+except ImportError:
+    import json  # type: ignore
 
 from config import SETTINGS
 from domain.models import PriceQuote
 from infrastructure.common import WebSocketClientProtocol, WebSocketPriceFeedClient
+from infrastructure.common.rest_pool import get_http_client
 
 
 @dataclass
@@ -63,7 +66,11 @@ class BinanceWebSocketClient(WebSocketPriceFeedClient[BinanceWsConfig]):
             return []
 
     def _message_to_quote(self, raw_message: str) -> PriceQuote:
-        payload = json.loads(raw_message)
+        # orjson requires bytes, standard json requires str
+        if json.__name__ == 'orjson':
+            payload = json.loads(raw_message.encode('utf-8') if isinstance(raw_message, str) else raw_message)
+        else:
+            payload = json.loads(raw_message)
         data = payload.get("data", payload)
         kline = data.get("k", {})
 
@@ -124,19 +131,19 @@ class BinanceRestClient:
         if not symbols_list:
             return []
 
-        async with httpx.AsyncClient(timeout=SETTINGS.connector.rest_timeout) as client:
-            tasks = [
-                client.get(
-                    self._base_url,
-                    params={
-                        "symbol": symbol,
-                        "interval": self._interval,
-                        "limit": 1,
-                    },
-                )
-                for symbol in symbols_list
-            ]
-            responses = await asyncio.gather(*tasks, return_exceptions=True)
+        client = get_http_client("binance")
+        tasks = [
+            client.get(
+                self._base_url,
+                params={
+                    "symbol": symbol,
+                    "interval": self._interval,
+                    "limit": 1,
+                },
+            )
+            for symbol in symbols_list
+        ]
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
 
         candles: list[PriceQuote] = []
         for symbol, response in zip(symbols_list, responses, strict=False):

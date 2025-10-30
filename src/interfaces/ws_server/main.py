@@ -2,11 +2,23 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 from datetime import datetime
 from datetime import timezone
 from typing import Any
+
+try:
+    import orjson as json_lib
+    def dumps(obj: Any) -> str:
+        return json_lib.dumps(obj).decode('utf-8')
+    def loads(s: str) -> Any:
+        return json_lib.loads(s.encode('utf-8') if isinstance(s, str) else s)
+except ImportError:
+    import json as json_lib
+    def dumps(obj: Any) -> str:
+        return json_lib.dumps(obj)
+    def loads(s: str) -> Any:
+        return json_lib.loads(s)
 
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -14,6 +26,9 @@ from websockets.exceptions import ConnectionClosed
 from application.use_cases.stream_prices import StreamPrices
 from config import SETTINGS
 from infrastructure.common.client import SubscriptionError
+from infrastructure.common.rest_pool import close_all_clients
+from infrastructure.common.shutdown import get_shutdown_handler
+from interfaces.health_server import create_health_server
 from interfaces.repository_factory import build_price_feed_repository
 
 LOGGER = logging.getLogger(__name__)
@@ -48,8 +63,8 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
         return
 
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
+        payload = loads(raw)
+    except Exception:
         await _send_error(websocket, "Subscription payload must be valid JSON")
         return
 
@@ -75,7 +90,7 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
         return
 
     await websocket.send(
-        json.dumps(
+        dumps(
             {
                 "type": "subscribed",
                 "exchange": exchange,
@@ -137,7 +152,7 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
                 "trade_num": quote.trade_num,
                 "is_closed_candle": quote.is_closed_candle,
             }
-            await websocket.send(json.dumps(response))
+            await websocket.send(dumps(response))
 
             if limit > 0:
                 counter += 1
@@ -209,13 +224,28 @@ async def _send_error(
             payload["symbols"] = symbols
         if exchange_message:
             payload["exchange_message"] = exchange_message
-        await websocket.send(json.dumps(payload))
+        await websocket.send(dumps(payload))
     except ConnectionClosed:
         pass
 
 
 async def run_server(host: str, port: int) -> None:
     LOGGER.info("Starting WebSocket server", extra={"host": host, "port": port})
+
+    # Setup graceful shutdown
+    shutdown_handler = get_shutdown_handler()
+    shutdown_handler.setup_signal_handlers()
+
+    # Register cleanup callbacks
+    shutdown_handler.register_cleanup(close_all_clients)
+
+    # Start health check server
+    health_server = create_health_server()
+    if health_server:
+        health_server.start()
+        shutdown_handler.register_cleanup(health_server.stop)
+
+    # Start WebSocket server
     async with websockets.serve(
         handle_client,
         host,
@@ -223,7 +253,15 @@ async def run_server(host: str, port: int) -> None:
         ping_interval=SETTINGS.connector.ws_ping_interval,
         ping_timeout=SETTINGS.connector.ws_ping_timeout,
     ):
-        await asyncio.Future()
+        LOGGER.info("WebSocket server ready to accept connections")
+
+        # Wait for shutdown signal
+        await shutdown_handler.wait_for_shutdown()
+
+        LOGGER.info("Shutdown signal received, cleaning up...")
+        await shutdown_handler.cleanup()
+
+        LOGGER.info("Server shutdown complete")
 
 
 def main() -> None:
