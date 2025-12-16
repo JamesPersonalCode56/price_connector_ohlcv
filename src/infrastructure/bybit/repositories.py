@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from infrastructure.common import ContractTypeResolver, RegistryBackedPriceFeedRepository
+from infrastructure.common import (
+    ContractTypeResolver,
+    RegistryBackedPriceFeedRepository,
+)
 
 from .client import BybitClientConfig, BybitWebSocketClient
 
-
-_CONFIG_RESOLVER = ContractTypeResolver(
+_CONFIG_RESOLVER: ContractTypeResolver[BybitClientConfig] = ContractTypeResolver(
     {
         "spot": lambda: BybitClientConfig(
             base_stream_url="wss://stream.bybit.com/v5/public/spot",

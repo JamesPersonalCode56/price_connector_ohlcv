@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
-from typing import Deque, Generic, TypeVar
+from typing import Deque, TypeVar
 
 from domain.models import PriceQuote
 
@@ -38,7 +38,9 @@ class QuoteQueue:
             exchange: Exchange name for logging/metrics
             contract_type: Contract type for logging/metrics
         """
-        self._closed_queue: asyncio.Queue[PriceQuote] = asyncio.Queue(maxsize=closed_maxsize)
+        self._closed_queue: asyncio.Queue[PriceQuote] = asyncio.Queue(
+            maxsize=closed_maxsize
+        )
         self._open_stack: Deque[PriceQuote] = deque()
         self._open_maxsize = open_maxsize
         self._closed_maxsize = closed_maxsize
@@ -101,7 +103,10 @@ class QuoteQueue:
         else:
             # Open candles go to LIFO stack
             async with self._lock:
-                if self._open_maxsize is not None and len(self._open_stack) >= self._open_maxsize:
+                if (
+                    self._open_maxsize is not None
+                    and len(self._open_stack) >= self._open_maxsize
+                ):
                     # Drop oldest (bottom) item if overflow
                     self._open_overflow_events += 1
                     if self._open_stack:

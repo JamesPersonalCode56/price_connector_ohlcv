@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -11,6 +12,8 @@ import httpx
 from config import SETTINGS
 from domain.models import PriceQuote
 from infrastructure.common import WebSocketClientProtocol, WebSocketPriceFeedClient
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -30,7 +33,9 @@ class OkxWebSocketClient(WebSocketPriceFeedClient[OkxClientConfig]):
     def _build_connection_args(self, symbols: list[str]) -> dict[str, Any]:
         return {"url": self._config.base_stream_url}
 
-    async def _on_connected(self, ws: WebSocketClientProtocol, symbols: list[str]) -> None:
+    async def _on_connected(
+        self, ws: WebSocketClientProtocol, symbols: list[str]
+    ) -> None:
         channel = f"candle{self._config.interval}"
         args = [{"channel": channel, "instId": symbol} for symbol in symbols]
         subscribe_message = json.dumps({"op": "subscribe", "args": args})
@@ -89,7 +94,9 @@ class OkxWebSocketClient(WebSocketPriceFeedClient[OkxClientConfig]):
             return None
 
         try:
-            timestamp = datetime.fromtimestamp(int(float(entry[0])) / 1000, tz=timezone.utc)
+            timestamp = datetime.fromtimestamp(
+                int(float(entry[0])) / 1000, tz=timezone.utc
+            )
             open_price = float(entry[1])
             high_price = float(entry[2])
             low_price = float(entry[3])
@@ -125,6 +132,9 @@ class OkxWebSocketClient(WebSocketPriceFeedClient[OkxClientConfig]):
 class OkxRestClient:
     _BASE_URL = "https://www.okx.com/api/v5/market/candles"
 
+    def __init__(self) -> None:
+        self._logger = LOGGER
+
     async def fetch_latest_candles(
         self,
         symbols: Iterable[str],
@@ -138,15 +148,27 @@ class OkxRestClient:
         async with httpx.AsyncClient(timeout=SETTINGS.connector.rest_timeout) as client:
             tasks = []
             for symbol in symbols_list:
-                params = {"instId": symbol, "bar": interval, "limit": 1}
+                params: dict[str, str] = {
+                    "instId": symbol,
+                    "bar": interval,
+                    "limit": "1",
+                }
                 if inst_type:
                     params["instType"] = inst_type
                 tasks.append(client.get(self._BASE_URL, params=params))
-            responses = await asyncio.gather(*tasks, return_exceptions=True)
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
 
         candles: list[PriceQuote] = []
         for symbol, response in zip(symbols_list, responses, strict=False):
-            if isinstance(response, Exception):
+            if isinstance(response, BaseException):
+                self._logger.warning(
+                    "OKX REST request failed",
+                    extra={
+                        "symbol": symbol,
+                        "contract_type": (inst_type or "").lower(),
+                    },
+                    exc_info=isinstance(response, Exception),
+                )
                 continue
             try:
                 response.raise_for_status()
@@ -157,7 +179,9 @@ class OkxRestClient:
                 entry = data[0]
                 if not isinstance(entry, (list, tuple)) or len(entry) < 6:
                     continue
-                timestamp = datetime.fromtimestamp(int(float(entry[0])) / 1000, tz=timezone.utc)
+                timestamp = datetime.fromtimestamp(
+                    int(float(entry[0])) / 1000, tz=timezone.utc
+                )
                 open_price = float(entry[1])
                 high_price = float(entry[2])
                 low_price = float(entry[3])
@@ -186,5 +210,13 @@ class OkxRestClient:
                     )
                 )
             except Exception:
+                self._logger.warning(
+                    "Failed to parse OKX REST candle",
+                    extra={
+                        "symbol": symbol,
+                        "contract_type": (inst_type or "").lower(),
+                    },
+                    exc_info=True,
+                )
                 continue
         return candles

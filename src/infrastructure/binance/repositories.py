@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from infrastructure.common import ContractTypeResolver, RegistryBackedPriceFeedRepository
+from infrastructure.common import (
+    ContractTypeResolver,
+    RegistryBackedPriceFeedRepository,
+)
 
 from .client import BinanceWebSocketClient, BinanceWsConfig
 
-
-_CONFIG_RESOLVER = ContractTypeResolver(
+_CONFIG_RESOLVER: ContractTypeResolver[BinanceWsConfig] = ContractTypeResolver(
     {
         "spot": lambda: BinanceWsConfig(
             contract_type="spot",

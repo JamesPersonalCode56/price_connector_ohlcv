@@ -64,7 +64,9 @@ class HyperliquidWebSocketClient(WebSocketPriceFeedClient[HyperliquidWsConfig]):
     def _build_connection_args(self, symbols: list[str]) -> dict[str, Any]:
         return {"url": self._config.stream_url}
 
-    async def _on_connected(self, ws: WebSocketClientProtocol, symbols: list[str]) -> None:
+    async def _on_connected(
+        self, ws: WebSocketClientProtocol, symbols: list[str]
+    ) -> None:
         for symbol in symbols:
             normalized = self._normalize_symbol(symbol)
             subscribe_message = {
@@ -96,7 +98,10 @@ class HyperliquidWebSocketClient(WebSocketPriceFeedClient[HyperliquidWsConfig]):
         try:
             message = json.loads(message_text)
         except json.JSONDecodeError:
-            self._logger.warning("Discarding non-JSON Hyperliquid payload", extra={"payload": message_text})
+            self._logger.warning(
+                "Discarding non-JSON Hyperliquid payload",
+                extra={"payload": message_text},
+            )
             return []
 
         channel = message.get("channel")
@@ -118,7 +123,9 @@ class HyperliquidWebSocketClient(WebSocketPriceFeedClient[HyperliquidWsConfig]):
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000.0)
         lookback_multiplier = 5
         start_ms = (
-            0 if interval_ms is None else max(0, now_ms - interval_ms * lookback_multiplier)
+            0
+            if interval_ms is None
+            else max(0, now_ms - interval_ms * lookback_multiplier)
         )
 
         quotes: list[PriceQuote] = []
@@ -180,7 +187,9 @@ class HyperliquidWebSocketClient(WebSocketPriceFeedClient[HyperliquidWsConfig]):
                 if separator in upper_cleaned:
                     base, quote = upper_cleaned.split(separator, 1)
                     return f"{base}/{quote}"
-            raise ValueError("Hyperliquid spot symbols must include a quote currency, e.g. BTC/USDC")
+            raise ValueError(
+                "Hyperliquid spot symbols must include a quote currency, e.g. BTC/USDC"
+            )
 
         result = cleaned
         for separator in ("/", "_", ":", "-"):
@@ -194,7 +203,9 @@ class HyperliquidWebSocketClient(WebSocketPriceFeedClient[HyperliquidWsConfig]):
 
         return result
 
-    def _snapshot_to_quote(self, data: dict[str, Any], symbol: str) -> PriceQuote | None:
+    def _snapshot_to_quote(
+        self, data: dict[str, Any], symbol: str
+    ) -> PriceQuote | None:
         open_epoch = _to_epoch_ms(data.get("t"))
         if open_epoch is None:
             return None

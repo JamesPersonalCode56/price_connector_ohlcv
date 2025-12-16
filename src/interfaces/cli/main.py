@@ -9,17 +9,16 @@ from application.use_cases.stream_prices import StreamPrices
 from config import SETTINGS
 from interfaces.repository_factory import build_price_feed_repository
 
-EXCHANGES = {
-    "binance": "Binance",
-    "okx": "OKX",
-    "bybit": "Bybit",
-    "gateio": "Gate.io"
-}
+EXCHANGES = {"binance": "Binance", "okx": "OKX", "bybit": "Bybit", "gateio": "Gate.io"}
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Stream crypto prices via WebSocket using clean architecture layers")
-    parser.add_argument("exchange", choices=sorted(EXCHANGES.keys()), help="Exchange connector to use")
+    parser = argparse.ArgumentParser(
+        description="Stream crypto prices via WebSocket using clean architecture layers"
+    )
+    parser.add_argument(
+        "exchange", choices=sorted(EXCHANGES.keys()), help="Exchange connector to use"
+    )
     parser.add_argument(
         "symbols",
         nargs="+",
@@ -39,7 +38,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def run_stream(exchange: str, market: str | None, symbols: Iterable[str], limit: int) -> None:
+async def run_stream(
+    exchange: str, market: str | None, symbols: Iterable[str], limit: int
+) -> None:
     repository = build_price_feed_repository(exchange, market)
     use_case = StreamPrices(repository)
 
@@ -75,6 +76,7 @@ async def run_stream(exchange: str, market: str | None, symbols: Iterable[str], 
         aclose = getattr(stream, "aclose", None)
         if callable(aclose):
             await aclose()
+
 
 def main() -> None:
     args = parse_args()

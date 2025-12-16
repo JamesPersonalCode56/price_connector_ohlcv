@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, List
@@ -11,6 +12,8 @@ import httpx
 from config import SETTINGS
 from domain.models import PriceQuote
 from infrastructure.common import WebSocketClientProtocol, WebSocketPriceFeedClient
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -30,7 +33,9 @@ class BybitWebSocketClient(WebSocketPriceFeedClient[BybitClientConfig]):
     def _build_connection_args(self, symbols: list[str]) -> dict[str, Any]:
         return {"url": self._config.base_stream_url}
 
-    async def _on_connected(self, ws: WebSocketClientProtocol, symbols: list[str]) -> None:
+    async def _on_connected(
+        self, ws: WebSocketClientProtocol, symbols: list[str]
+    ) -> None:
         topics = [f"kline.{self._config.interval}.{symbol}" for symbol in symbols]
         subscribe_message = json.dumps({"op": "subscribe", "args": topics})
         await ws.send(subscribe_message)
@@ -70,7 +75,9 @@ class BybitWebSocketClient(WebSocketPriceFeedClient[BybitClientConfig]):
         ts_value = message.get("ts") or message.get("timestamp")
         if ts_value is not None:
             try:
-                stream_timestamp = datetime.fromtimestamp(int(ts_value) / 1000, tz=timezone.utc)
+                stream_timestamp = datetime.fromtimestamp(
+                    int(ts_value) / 1000, tz=timezone.utc
+                )
             except (TypeError, ValueError):
                 stream_timestamp = None
 
@@ -93,7 +100,9 @@ class BybitWebSocketClient(WebSocketPriceFeedClient[BybitClientConfig]):
                     timestamp = datetime.now(timezone.utc)
                 else:
                     try:
-                        timestamp = datetime.fromtimestamp(int(end_time) / 1000, tz=timezone.utc)
+                        timestamp = datetime.fromtimestamp(
+                            int(end_time) / 1000, tz=timezone.utc
+                        )
                     except (TypeError, ValueError):
                         timestamp = datetime.now(timezone.utc)
 
@@ -145,7 +154,10 @@ class BybitRestClient:
     def __init__(self, contract_type: str, interval: str) -> None:
         category = self._CATEGORY_ALIASES.get(contract_type)
         if category is None:
-            raise ValueError(f"Unsupported Bybit contract_type for REST backfill: {contract_type}")
+            raise ValueError(
+                f"Unsupported Bybit contract_type for REST backfill: {contract_type}"
+            )
+        self._logger = LOGGER
         self._category = category
         self._interval = interval
         try:
@@ -166,7 +178,7 @@ class BybitRestClient:
                         "category": self._category,
                         "symbol": symbol,
                         "interval": self._interval,
-                        "limit": 1,
+                        "limit": "1",
                     },
                 )
                 for symbol in symbols_list
@@ -175,7 +187,12 @@ class BybitRestClient:
 
         candles: list[PriceQuote] = []
         for symbol, response in zip(symbols_list, responses, strict=False):
-            if isinstance(response, Exception):
+            if isinstance(response, BaseException):
+                self._logger.warning(
+                    "Bybit REST request failed",
+                    extra={"symbol": symbol, "contract_type": self._category},
+                    exc_info=isinstance(response, Exception),
+                )
                 continue
             try:
                 response.raise_for_status()
@@ -210,5 +227,10 @@ class BybitRestClient:
                     )
                 )
             except Exception:
+                self._logger.warning(
+                    "Failed to parse Bybit REST candle",
+                    extra={"symbol": symbol, "contract_type": self._category},
+                    exc_info=True,
+                )
                 continue
         return candles

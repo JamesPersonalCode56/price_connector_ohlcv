@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, Iterable, Generic, List, TypeVar, cast
+from typing import Any, AsyncIterator, Generic, Iterable, List, TypeVar, cast
 
 import websockets
 from websockets import WebSocketClientProtocol
@@ -34,7 +34,9 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
         self._config = config
         self._logger = logging.getLogger(self._logger_name())
 
-    async def stream_ticker_prices(self, symbols: Iterable[str]) -> AsyncIterator[PriceQuote]:
+    async def stream_ticker_prices(
+        self, symbols: Iterable[str]
+    ) -> AsyncIterator[PriceQuote]:
         symbols_list = self._prepare_symbols(symbols)
         if not symbols_list:
             return
@@ -98,13 +100,17 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
                 with contextlib.suppress(Exception):
                     await task
 
-    async def _stream_single_connection(self, symbols: list[str]) -> AsyncIterator[PriceQuote]:
+    async def _stream_single_connection(
+        self, symbols: list[str]
+    ) -> AsyncIterator[PriceQuote]:
         while True:
             try:
                 try:
                     connect_kwargs = self._build_connection_args(symbols)
                 except ValueError as exc:
-                    raise SubscriptionError(str(exc), exchange_message=str(exc)) from exc
+                    raise SubscriptionError(
+                        str(exc), exchange_message=str(exc)
+                    ) from exc
                 url = connect_kwargs.pop("url")
                 async with websockets.connect(
                     url,
@@ -115,7 +121,9 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
                     try:
                         await self._on_connected(ws, symbols)
                     except ValueError as exc:
-                        raise SubscriptionError(str(exc), exchange_message=str(exc)) from exc
+                        raise SubscriptionError(
+                            str(exc), exchange_message=str(exc)
+                        ) from exc
                     async for quote in self._message_loop(ws, symbols):
                         yield quote
             except asyncio.CancelledError:
@@ -139,14 +147,19 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
                     timeout=SETTINGS.connector.inactivity_timeout,
                 )
             except asyncio.TimeoutError:
-                self._logger.warning(self._inactivity_warning_message(), SETTINGS.connector.inactivity_timeout)
+                self._logger.warning(
+                    self._inactivity_warning_message(),
+                    SETTINGS.connector.inactivity_timeout,
+                )
                 try:
                     async for quote in self._on_inactivity(symbols):
                         yield quote
                 except SubscriptionError:
                     raise
                 except Exception:
-                    self._logger.exception("Error during inactivity backfill", extra={"symbols": symbols})
+                    self._logger.exception(
+                        "Error during inactivity backfill", extra={"symbols": symbols}
+                    )
                 break
             except ConnectionClosed:
                 self._logger.info(self._connection_closed_message())
@@ -159,7 +172,11 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
                 self._logger.exception(self._receive_error_message())
                 break
 
-            message_text = raw_message.decode("utf-8") if isinstance(raw_message, bytes) else raw_message
+            message_text = (
+                raw_message.decode("utf-8")
+                if isinstance(raw_message, bytes)
+                else raw_message
+            )
             quotes = await self._process_message(message_text, symbols, ws)
             if not quotes:
                 continue
@@ -194,13 +211,17 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
         limit = SETTINGS.connector.max_symbol_per_ws
         if limit <= 0 or len(symbols) <= limit:
             return [symbols]
-        return [symbols[index : index + limit] for index in range(0, len(symbols), limit)]
+        return [
+            symbols[index : index + limit] for index in range(0, len(symbols), limit)
+        ]
 
     @abstractmethod
     def _build_connection_args(self, symbols: list[str]) -> dict[str, Any]:
         """Return keyword arguments passed to websockets.connect (must include `url`)."""
 
-    async def _on_connected(self, ws: WebSocketClientProtocol, symbols: list[str]) -> None:
+    async def _on_connected(
+        self, ws: WebSocketClientProtocol, symbols: list[str]
+    ) -> None:
         """Run after the websocket connection has been established."""
 
     @abstractmethod

@@ -32,7 +32,9 @@ def _resolve_level() -> int:
 
 def configure_logging() -> None:
     root_logger = logging.getLogger()
-    if any(isinstance(handler, logging.StreamHandler) for handler in root_logger.handlers):
+    if any(
+        isinstance(handler, logging.StreamHandler) for handler in root_logger.handlers
+    ):
         return
 
     level = _resolve_level()

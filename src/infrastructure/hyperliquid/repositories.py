@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from infrastructure.common import ContractTypeResolver, RegistryBackedPriceFeedRepository
+from infrastructure.common import (
+    ContractTypeResolver,
+    RegistryBackedPriceFeedRepository,
+)
 
 from .client import HyperliquidWebSocketClient, HyperliquidWsConfig
 
-
-_CONFIG_RESOLVER = ContractTypeResolver(
+_CONFIG_RESOLVER: ContractTypeResolver[HyperliquidWsConfig] = ContractTypeResolver(
     {
         "spot": lambda: HyperliquidWsConfig(market_type="spot", contract_type="spot"),
         "usdm": lambda: HyperliquidWsConfig(market_type="perp", contract_type="usdm"),
@@ -22,7 +24,9 @@ _CONFIG_RESOLVER = ContractTypeResolver(
 )
 
 
-class HyperliquidPriceFeedRepository(RegistryBackedPriceFeedRepository[HyperliquidWsConfig]):
+class HyperliquidPriceFeedRepository(
+    RegistryBackedPriceFeedRepository[HyperliquidWsConfig]
+):
     client_cls = HyperliquidWebSocketClient
     resolver = _CONFIG_RESOLVER
 

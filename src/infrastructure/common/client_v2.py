@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, Iterable, Generic, List, TypeVar, cast
+from typing import Any, AsyncIterator, Generic, Iterable, List, TypeVar
 
 import websockets
 from websockets import WebSocketClientProtocol
@@ -14,7 +14,11 @@ from websockets.exceptions import ConnectionClosed
 
 from config import SETTINGS
 from domain.models import PriceQuote
-from infrastructure.common.circuit_breaker import CircuitBreaker, CircuitBreakerError, CircuitState
+from infrastructure.common.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerError,
+    CircuitState,
+)
 from infrastructure.common.deduplicator import QuoteDeduplicator
 from infrastructure.common.quote_queue import QuoteQueue
 from metrics import get_metrics_collector
@@ -48,12 +52,12 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
         self._metrics = get_metrics_collector()
 
         # Will be initialized per connection group
-        self._circuit_breaker: CircuitBreaker | None = None
+        self._circuit_breaker: CircuitBreaker[AsyncIterator[PriceQuote]] | None = None
         self._deduplicator: QuoteDeduplicator | None = None
 
     def _init_connection_components(self, contract_type: str) -> None:
         """Initialize circuit breaker and deduplicator for this connection."""
-        self._circuit_breaker = CircuitBreaker(
+        self._circuit_breaker = CircuitBreaker[AsyncIterator[PriceQuote]](
             failure_threshold=SETTINGS.connector.circuit_breaker_failure_threshold,
             recovery_timeout=SETTINGS.connector.circuit_breaker_recovery_timeout,
             half_open_max_calls=SETTINGS.connector.circuit_breaker_half_open_calls,
@@ -66,7 +70,9 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
             contract_type=contract_type,
         )
 
-    async def stream_ticker_prices(self, symbols: Iterable[str]) -> AsyncIterator[PriceQuote]:
+    async def stream_ticker_prices(
+        self, symbols: Iterable[str]
+    ) -> AsyncIterator[PriceQuote]:
         symbols_list = self._prepare_symbols(symbols)
         if not symbols_list:
             return
@@ -108,7 +114,7 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
                     await queue.put(quote)
             except asyncio.CancelledError:
                 raise
-            except SubscriptionError as exc:
+            except SubscriptionError:
                 stop_event.set()
                 # Convert to PriceQuote-like sentinel for error propagation
                 # We'll handle this differently - just raise
@@ -160,23 +166,27 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
                 with contextlib.suppress(Exception):
                     await task
 
-    async def _stream_single_connection(self, symbols: list[str]) -> AsyncIterator[PriceQuote]:
+    async def _stream_single_connection(
+        self, symbols: list[str]
+    ) -> AsyncIterator[PriceQuote]:
         """Stream quotes from a single WebSocket connection with circuit breaker protection."""
         contract_type = getattr(self._config, "contract_type", "default")
 
         # Initialize components for this connection
         self._init_connection_components(contract_type)
 
-        assert self._circuit_breaker is not None
-        assert self._deduplicator is not None
+        if self._circuit_breaker is None or self._deduplicator is None:
+            raise RuntimeError("Connection components not initialized")
 
         while True:
             try:
                 # Check circuit breaker before attempting connection
                 if self._circuit_breaker.state == CircuitState.OPEN:
-                    self._metrics.record_circuit_state(self.exchange, contract_type, "open")
+                    self._metrics.record_circuit_state(
+                        self.exchange, contract_type, "open"
+                    )
                     self._logger.warning(
-                        f"Circuit breaker is OPEN, waiting before retry",
+                        "Circuit breaker is OPEN, waiting before retry",
                         extra={
                             "exchange": self.exchange,
                             "contract_type": contract_type,
@@ -188,34 +198,47 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
 
                 # Attempt connection through circuit breaker
                 async def _connect_and_stream() -> AsyncIterator[PriceQuote]:
-                    try:
-                        connect_kwargs = self._build_connection_args(symbols)
-                    except ValueError as exc:
-                        raise SubscriptionError(str(exc), exchange_message=str(exc)) from exc
-
-                    url = connect_kwargs.pop("url")
-
-                    async with websockets.connect(
-                        url,
-                        ping_interval=SETTINGS.connector.ws_ping_interval,
-                        ping_timeout=SETTINGS.connector.ws_ping_timeout,
-                        **connect_kwargs,
-                    ) as ws:
-                        self._metrics.record_connection(self.exchange, contract_type, active=True)
-
+                    async def _stream() -> AsyncIterator[PriceQuote]:
                         try:
-                            await self._on_connected(ws, symbols)
+                            connect_kwargs = self._build_connection_args(symbols)
                         except ValueError as exc:
-                            raise SubscriptionError(str(exc), exchange_message=str(exc)) from exc
+                            raise SubscriptionError(
+                                str(exc), exchange_message=str(exc)
+                            ) from exc
 
-                        async for quote in self._message_loop(ws, symbols):
-                            yield quote
+                        url = connect_kwargs.pop("url")
 
-                        self._metrics.record_connection(self.exchange, contract_type, active=False)
+                        async with websockets.connect(
+                            url,
+                            ping_interval=SETTINGS.connector.ws_ping_interval,
+                            ping_timeout=SETTINGS.connector.ws_ping_timeout,
+                            **connect_kwargs,
+                        ) as ws:
+                            self._metrics.record_connection(
+                                self.exchange, contract_type, active=True
+                            )
+
+                            try:
+                                await self._on_connected(ws, symbols)
+                            except ValueError as exc:
+                                raise SubscriptionError(
+                                    str(exc), exchange_message=str(exc)
+                                ) from exc
+
+                            async for quote in self._message_loop(ws, symbols):
+                                yield quote
+
+                            self._metrics.record_connection(
+                                self.exchange, contract_type, active=False
+                            )
+
+                    return _stream()
 
                 # Execute through circuit breaker
                 try:
-                    async for quote in await self._circuit_breaker.call(_connect_and_stream):
+                    async for quote in await self._circuit_breaker.call(
+                        _connect_and_stream
+                    ):
                         # Deduplicate
                         if self._deduplicator.is_duplicate(quote):
                             self._metrics.record_duplicate(self.exchange, contract_type)
@@ -277,7 +300,9 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
                 except SubscriptionError:
                     raise
                 except Exception:
-                    self._logger.exception("Error during inactivity backfill", extra={"symbols": symbols})
+                    self._logger.exception(
+                        "Error during inactivity backfill", extra={"symbols": symbols}
+                    )
                     self._metrics.record_error(
                         self.exchange,
                         contract_type,
@@ -301,7 +326,11 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
                 )
                 break
 
-            message_text = raw_message.decode("utf-8") if isinstance(raw_message, bytes) else raw_message
+            message_text = (
+                raw_message.decode("utf-8")
+                if isinstance(raw_message, bytes)
+                else raw_message
+            )
             quotes = await self._process_message(message_text, symbols, ws)
             if not quotes:
                 continue
@@ -318,11 +347,15 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
                 self.exchange,
                 contract_type,
                 success=True,
-                quote_count=len(list(backfill_quotes)) if hasattr(backfill_quotes, "__len__") else 0,
+                quote_count=(
+                    len(list(backfill_quotes))
+                    if hasattr(backfill_quotes, "__len__")
+                    else 0
+                ),
             )
             for quote in backfill_quotes:
                 yield quote
-        except Exception as exc:
+        except Exception:
             self._metrics.record_rest_backfill(
                 self.exchange,
                 contract_type,
@@ -353,13 +386,17 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
         limit = SETTINGS.connector.max_symbol_per_ws
         if limit <= 0 or len(symbols) <= limit:
             return [symbols]
-        return [symbols[index : index + limit] for index in range(0, len(symbols), limit)]
+        return [
+            symbols[index : index + limit] for index in range(0, len(symbols), limit)
+        ]
 
     @abstractmethod
     def _build_connection_args(self, symbols: list[str]) -> dict[str, Any]:
         """Return keyword arguments passed to websockets.connect (must include `url`)."""
 
-    async def _on_connected(self, ws: WebSocketClientProtocol, symbols: list[str]) -> None:
+    async def _on_connected(
+        self, ws: WebSocketClientProtocol, symbols: list[str]
+    ) -> None:
         """Run after the websocket connection has been established."""
 
     @abstractmethod

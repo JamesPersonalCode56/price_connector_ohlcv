@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import signal
-from typing import Callable, List
+from collections.abc import Awaitable, Callable
+from typing import List
 
 LOGGER = logging.getLogger(__name__)
 
@@ -15,10 +17,14 @@ class GracefulShutdown:
 
     def __init__(self) -> None:
         self._shutdown_event = asyncio.Event()
-        self._cleanup_callbacks: List[Callable[[], None] | Callable[[], asyncio.Coroutine]] = []
+        self._cleanup_callbacks: List[
+            Callable[[], None] | Callable[[], Awaitable[None]]
+        ] = []
         self._signals_registered = False
 
-    def register_cleanup(self, callback: Callable[[], None] | Callable[[], asyncio.Coroutine]) -> None:
+    def register_cleanup(
+        self, callback: Callable[[], None] | Callable[[], Awaitable[None]]
+    ) -> None:
         """
         Register a cleanup callback to run during shutdown.
 
@@ -39,7 +45,7 @@ class GracefulShutdown:
             self._shutdown_event.set()
 
         for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda s=sig: _signal_handler(s))
+            loop.add_signal_handler(sig, functools.partial(_signal_handler, sig))
 
         self._signals_registered = True
         LOGGER.info("Signal handlers registered for graceful shutdown")

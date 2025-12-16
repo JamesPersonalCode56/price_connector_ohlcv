@@ -62,18 +62,20 @@ def chunked(sequence: Sequence[str], size: int) -> Iterator[list[str]]:
         yield list(sequence[start : start + size])
 
 
-def build_error_from_payload(payload: Mapping[str, Any], job: SubscriptionJob) -> SubscriptionBatchError:
+def build_error_from_payload(
+    payload: Mapping[str, Any], job: SubscriptionJob
+) -> SubscriptionBatchError:
     system_message = str(
-        payload.get("system_message")
-        or payload.get("message")
-        or "subscription error"
+        payload.get("system_message") or payload.get("message") or "subscription error"
     )
     exchange_message_raw = payload.get("exchange_message")
     exchange_message = str(exchange_message_raw) if exchange_message_raw else None
     exchange = str(payload.get("exchange") or job.exchange)
     contract_type = str(payload.get("contract_type") or job.contract_type or "default")
     raw_symbols = payload.get("symbols")
-    if isinstance(raw_symbols, list) and all(isinstance(symbol, str) for symbol in raw_symbols):
+    if isinstance(raw_symbols, list) and all(
+        isinstance(symbol, str) for symbol in raw_symbols
+    ):
         symbols = list(raw_symbols)
     else:
         symbols = job.symbols
@@ -110,7 +112,9 @@ async def fetch_binance_symbols() -> BinanceSymbolMap:
             payload = response.json()
             symbols: list[str] = []
             for entry in payload.get("symbols", []):
-                status = (entry.get("status") or entry.get("contractStatus") or "").upper()
+                status = (
+                    entry.get("status") or entry.get("contractStatus") or ""
+                ).upper()
                 if status != "TRADING":
                     continue
                 symbol = entry.get("symbol")
@@ -167,7 +171,9 @@ async def fetch_gateio_symbols() -> GateioSymbolMap:
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         # Spot symbols
         try:
-            response = await client.get("https://api.gateio.ws/api/v4/spot/currency_pairs")
+            response = await client.get(
+                "https://api.gateio.ws/api/v4/spot/currency_pairs"
+            )
             response.raise_for_status()
             spot_symbols = [
                 entry["id"]
@@ -181,7 +187,9 @@ async def fetch_gateio_symbols() -> GateioSymbolMap:
 
         # USDT-margined (um) futures contracts
         try:
-            response = await client.get("https://api.gateio.ws/api/v4/futures/usdt/contracts")
+            response = await client.get(
+                "https://api.gateio.ws/api/v4/futures/usdt/contracts"
+            )
             response.raise_for_status()
             um_symbols = [
                 entry["name"]
@@ -195,7 +203,9 @@ async def fetch_gateio_symbols() -> GateioSymbolMap:
 
         # Coin-margined (cm) delivery contracts
         try:
-            response = await client.get("https://api.gateio.ws/api/v4/futures/contracts")
+            response = await client.get(
+                "https://api.gateio.ws/api/v4/futures/contracts"
+            )
             response.raise_for_status()
             cm_symbols = [
                 entry["name"]
@@ -302,7 +312,9 @@ async def fetch_okx_symbols() -> OkxSymbolMap:
     return results
 
 
-async def fetch_symbol_map(selected: set[str] | None) -> dict[tuple[str, str | None], list[str]]:
+async def fetch_symbol_map(
+    selected: set[str] | None,
+) -> dict[tuple[str, str | None], list[str]]:
     symbol_map: dict[tuple[str, str | None], list[str]] = {}
 
     if selected is None or "binance" in selected:
@@ -355,7 +367,9 @@ async def run_subscription(
             timeout_hit = False
             while limit <= 0 or received < limit:
                 try:
-                    raw = await asyncio.wait_for(websocket.recv(), timeout=message_timeout)
+                    raw = await asyncio.wait_for(
+                        websocket.recv(), timeout=message_timeout
+                    )
                 except asyncio.TimeoutError:
                     print(
                         f"[{job.exchange}::{job.contract_type or 'default'}] "
@@ -383,8 +397,12 @@ async def run_subscription(
                         f"@ {message.get('timestamp')}"
                     )
             if timeout_hit and received == 0:
-                return job, received, SubscriptionBatchError(
-                    "No quotes received before timeout", job.symbols
+                return (
+                    job,
+                    received,
+                    SubscriptionBatchError(
+                        "No quotes received before timeout", job.symbols
+                    ),
                 )
             return job, received, None
     except SubscriptionBatchError as exc:
@@ -405,9 +423,7 @@ async def execute(args: argparse.Namespace) -> None:
     selected = {item.lower() for item in args.exchanges} if args.exchanges else None
     symbol_map = await fetch_symbol_map(selected)
 
-    non_empty = {
-        key: symbols for key, symbols in symbol_map.items() if symbols
-    }
+    non_empty = {key: symbols for key, symbols in symbol_map.items() if symbols}
     empty = sorted(set(symbol_map) - set(non_empty))
 
     print("Discovered instrument universe:")
@@ -444,9 +460,13 @@ async def execute(args: argparse.Namespace) -> None:
         job: SubscriptionJob,
     ) -> tuple[SubscriptionJob, int, SubscriptionBatchError | None]:
         if semaphore is None:
-            return await run_subscription(job, args.ws_url, args.limit, args.message_timeout)
+            return await run_subscription(
+                job, args.ws_url, args.limit, args.message_timeout
+            )
         async with semaphore:
-            return await run_subscription(job, args.ws_url, args.limit, args.message_timeout)
+            return await run_subscription(
+                job, args.ws_url, args.limit, args.message_timeout
+            )
 
     results = await asyncio.gather(*(_run_with_limit(job) for job in jobs))
 

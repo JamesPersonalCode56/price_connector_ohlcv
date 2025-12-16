@@ -3,22 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from datetime import datetime
-from datetime import timezone
-from typing import Any
-
-try:
-    import orjson as json_lib
-    def dumps(obj: Any) -> str:
-        return json_lib.dumps(obj).decode('utf-8')
-    def loads(s: str) -> Any:
-        return json_lib.loads(s.encode('utf-8') if isinstance(s, str) else s)
-except ImportError:
-    import json as json_lib
-    def dumps(obj: Any) -> str:
-        return json_lib.dumps(obj)
-    def loads(s: str) -> Any:
-        return json_lib.loads(s)
+from datetime import datetime, timezone
+from typing import Any, cast
 
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -31,15 +17,48 @@ from infrastructure.common.shutdown import get_shutdown_handler
 from interfaces.health_server import create_health_server
 from interfaces.repository_factory import build_price_feed_repository
 
+try:
+    import orjson as json_lib  # type: ignore[import-not-found]
+
+    _USING_ORJSON = True
+except ImportError:
+    import json as json_lib  # type: ignore[no-redef]
+
+    _USING_ORJSON = False
+
+
+def dumps(obj: Any) -> str:
+    if _USING_ORJSON:
+        return cast(str, json_lib.dumps(obj).decode("utf-8"))
+    return cast(str, json_lib.dumps(obj))
+
+
+def loads(data: str | bytes) -> Any:
+    if _USING_ORJSON:
+        payload = data if isinstance(data, bytes) else data.encode("utf-8")
+        return json_lib.loads(payload)
+    if isinstance(data, bytes):
+        return json_lib.loads(data.decode("utf-8"))
+    return json_lib.loads(data)
+
+
 LOGGER = logging.getLogger(__name__)
 
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Expose price streams over a WebSocket server")
-    parser.add_argument(
-        "--host", default=SETTINGS.ws_server.host, help="Host/IP to bind the WebSocket server"
+    parser = argparse.ArgumentParser(
+        description="Expose price streams over a WebSocket server"
     )
     parser.add_argument(
-        "--port", type=int, default=SETTINGS.ws_server.port, help="Port to bind the WebSocket server"
+        "--host",
+        default=SETTINGS.ws_server.host,
+        help="Host/IP to bind the WebSocket server",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=SETTINGS.ws_server.port,
+        help="Port to bind the WebSocket server",
     )
     parser.add_argument(
         "--log-level",
@@ -52,7 +71,9 @@ def parse_args() -> argparse.Namespace:
 
 async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
     try:
-        raw = await asyncio.wait_for(websocket.recv(), timeout=SETTINGS.ws_server.subscribe_timeout)
+        raw = await asyncio.wait_for(
+            websocket.recv(), timeout=SETTINGS.ws_server.subscribe_timeout
+        )
     except asyncio.TimeoutError:
         await _send_error(
             websocket,
@@ -69,7 +90,9 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
         return
 
     try:
-        exchange, symbols, contract_type, limit = _validate_subscription_payload(payload)
+        exchange, symbols, contract_type, limit = _validate_subscription_payload(
+            payload
+        )
     except ValueError as exc:
         await _send_error(websocket, str(exc), exchange=exchange)
         return
@@ -86,7 +109,9 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
     try:
         repository = build_price_feed_repository(exchange, contract_type)
     except ValueError as exc:
-        await _send_error(websocket, str(exc), exchange=exchange, contract_type=contract_type)
+        await _send_error(
+            websocket, str(exc), exchange=exchange, contract_type=contract_type
+        )
         return
 
     await websocket.send(
@@ -176,7 +201,9 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
             await aclose()
 
 
-def _validate_subscription_payload(payload: Any) -> tuple[str, list[str], str | None, int]:
+def _validate_subscription_payload(
+    payload: Any,
+) -> tuple[str, list[str], str | None, int]:
     if not isinstance(payload, dict):
         raise ValueError("Subscription payload must be an object")
 
@@ -191,8 +218,12 @@ def _validate_subscription_payload(payload: Any) -> tuple[str, list[str], str | 
         raise ValueError("Each symbol must be a non-empty string")
 
     contract_type = payload.get("contract_type")
-    if contract_type is not None and (not isinstance(contract_type, str) or not contract_type):
-        raise ValueError("Field 'contract_type' must be a non-empty string when provided")
+    if contract_type is not None and (
+        not isinstance(contract_type, str) or not contract_type
+    ):
+        raise ValueError(
+            "Field 'contract_type' must be a non-empty string when provided"
+        )
 
     limit = payload.get("limit", 0)
     if not isinstance(limit, int) or limit < 0:

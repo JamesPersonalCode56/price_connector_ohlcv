@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -37,7 +36,9 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         """Suppress default HTTP logging (we use our own logger)."""
         pass
 
-    def _send_response(self, status: int, content: bytes, content_type: str = "text/plain") -> None:
+    def _send_response(
+        self, status: int, content: bytes, content_type: str = "text/plain"
+    ) -> None:
         """Send HTTP response."""
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -88,23 +89,32 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             is_healthy = (
                 health.active_connections > 0
                 and health.last_message_time is not None
-                and (datetime.now(timezone.utc) - health.last_message_time).total_seconds() < 60
+                and (
+                    datetime.now(timezone.utc) - health.last_message_time
+                ).total_seconds()
+                < 60
             )
 
             if is_healthy:
                 has_active_connections = True
 
-            exchanges.append({
-                "exchange": health.exchange,
-                "contract_type": health.contract_type,
-                "active_connections": health.active_connections,
-                "last_message_time": health.last_message_time.isoformat() if health.last_message_time else None,
-                "total_quotes": health.total_quotes,
-                "total_errors": health.total_errors,
-                "consecutive_failures": health.consecutive_failures,
-                "circuit_state": health.circuit_state,
-                "healthy": is_healthy,
-            })
+            exchanges.append(
+                {
+                    "exchange": health.exchange,
+                    "contract_type": health.contract_type,
+                    "active_connections": health.active_connections,
+                    "last_message_time": (
+                        health.last_message_time.isoformat()
+                        if health.last_message_time
+                        else None
+                    ),
+                    "total_quotes": health.total_quotes,
+                    "total_errors": health.total_errors,
+                    "consecutive_failures": health.consecutive_failures,
+                    "circuit_state": health.circuit_state,
+                    "healthy": is_healthy,
+                }
+            )
 
         status_code = 200 if has_active_connections else 503
         response = {
@@ -144,10 +154,11 @@ class HealthCheckServer:
 
         def _run_server() -> None:
             LOGGER.info(
-                f"Health check server started",
+                "Health check server started",
                 extra={"host": self._host, "port": self._port},
             )
-            assert self._server is not None
+            if self._server is None:
+                raise RuntimeError("Health check server not initialized")
             self._server.serve_forever()
 
         self._thread = Thread(target=_run_server, daemon=True, name="HealthCheckServer")

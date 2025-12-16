@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from enum import Enum
-from typing import Callable, Generic, TypeVar
+from typing import Awaitable, Callable, Generic, TypeVar
 
 T = TypeVar("T")
 
@@ -25,7 +24,7 @@ class CircuitBreakerError(Exception):
     pass
 
 
-class CircuitBreaker:
+class CircuitBreaker(Generic[T]):
     """Circuit breaker with exponential backoff for fault tolerance."""
 
     def __init__(
@@ -94,7 +93,7 @@ class CircuitBreaker:
 
         return elapsed >= required_timeout
 
-    async def call(self, func: Callable[..., T], *args, **kwargs) -> T:
+    async def call(self, func: Callable[..., Awaitable[T]], *args, **kwargs) -> T:
         """
         Execute function with circuit breaker protection.
 

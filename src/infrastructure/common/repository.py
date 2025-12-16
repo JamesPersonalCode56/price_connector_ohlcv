@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import AsyncIterator, ClassVar, Generic, Mapping, Protocol, TypeVar
+from typing import AsyncIterator, ClassVar, Generic, Mapping, Protocol, TypeVar, cast
 
 from domain.models import PriceQuote
 from domain.repositories import PriceFeedRepository
 
-
 TConfig = TypeVar("TConfig")
+Factory = Callable[[], TConfig]
 
 
 class PriceFeedClientProtocol(Protocol):
     """Protocol describing the minimal websocket client behaviour we rely on."""
+
+    def __init__(self, config: object) -> None: ...
 
     def stream_ticker_prices(self, symbols: Iterable[str]) -> AsyncIterator[PriceQuote]:
         """Return an async iterator that yields `PriceQuote` instances."""
@@ -31,18 +33,29 @@ class ContractTypeResolver(Generic[TConfig]):
         error_message: str | None = None,
         missing_message: str | None = None,
     ) -> None:
-        self._normalizer = normalizer or (lambda value: value.lower())
-        self._factories = {
-            key: (value if callable(value) else (lambda v=value: v))
-            for key, value in canonical_factories.items()
+        normalizer_fn: Callable[[str], str] = normalizer or (
+            lambda value: value.lower()
+        )
+        self._normalizer = normalizer_fn
+
+        factories: dict[str, Factory] = {}
+        for key, value in canonical_factories.items():
+            if callable(value):
+                factories[key] = cast(Factory, value)
+            else:
+                factories[key] = cast(Factory, lambda v=value: v)
+        self._factories = factories
+        self._aliases = {
+            self._normalizer(alias): target for alias, target in (aliases or {}).items()
         }
-        self._aliases = {self._normalizer(alias): target for alias, target in (aliases or {}).items()}
         self._default_key = default_key
         self._error_message = error_message
         self._missing_message = missing_message
 
         if default_key is not None and default_key not in self._factories:
-            raise ValueError(f"default_key '{default_key}' is not present in canonical factories")
+            raise ValueError(
+                f"default_key '{default_key}' is not present in canonical factories"
+            )
 
     def resolve(self, contract_type: str | None) -> TConfig:
         """Resolve a contract type string (with aliases) into the configured value."""

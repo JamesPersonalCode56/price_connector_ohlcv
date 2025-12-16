@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -10,10 +11,11 @@ try:
 except ImportError:
     import json  # type: ignore
 
-from config import SETTINGS
 from domain.models import PriceQuote
 from infrastructure.common import WebSocketClientProtocol, WebSocketPriceFeedClient
 from infrastructure.common.rest_pool import get_http_client
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -23,7 +25,9 @@ class BinanceWsConfig:
     interval: str = "1m"
 
     def build_stream_url(self, symbols: Iterable[str]) -> str:
-        streams = "/".join(f"{symbol.lower()}@kline_{self.interval}" for symbol in symbols)
+        streams = "/".join(
+            f"{symbol.lower()}@kline_{self.interval}" for symbol in symbols
+        )
         return f"{self.base_stream_url}/stream?streams={streams}"
 
 
@@ -39,9 +43,13 @@ class BinanceWebSocketClient(WebSocketPriceFeedClient[BinanceWsConfig]):
     def _build_connection_args(self, symbols: list[str]) -> dict[str, Any]:
         return {"url": self._config.build_stream_url(symbols)}
 
-    async def _on_connected(self, ws: WebSocketClientProtocol, symbols: list[str]) -> None:
+    async def _on_connected(
+        self, ws: WebSocketClientProtocol, symbols: list[str]
+    ) -> None:
         url = self._config.build_stream_url(symbols)
-        self._logger.info("Connected to Binance WS stream", extra={"url": url, "symbols": symbols})
+        self._logger.info(
+            "Connected to Binance WS stream", extra={"url": url, "symbols": symbols}
+        )
 
     def _inactivity_warning_message(self) -> str:
         return "No Binance updates for %.1fs, attempting REST backfill and reconnect"
@@ -67,8 +75,12 @@ class BinanceWebSocketClient(WebSocketPriceFeedClient[BinanceWsConfig]):
 
     def _message_to_quote(self, raw_message: str) -> PriceQuote:
         # orjson requires bytes, standard json requires str
-        if json.__name__ == 'orjson':
-            payload = json.loads(raw_message.encode('utf-8') if isinstance(raw_message, str) else raw_message)
+        if json.__name__ == "orjson":
+            payload = json.loads(
+                raw_message.encode("utf-8")
+                if isinstance(raw_message, str)
+                else raw_message
+            )
         else:
             payload = json.loads(raw_message)
         data = payload.get("data", payload)
@@ -95,7 +107,9 @@ class BinanceWebSocketClient(WebSocketPriceFeedClient[BinanceWsConfig]):
         if close_timestamp is None:
             timestamp = datetime.now(timezone.utc)
         else:
-            timestamp = datetime.fromtimestamp(int(close_timestamp) / 1000, tz=timezone.utc)
+            timestamp = datetime.fromtimestamp(
+                int(close_timestamp) / 1000, tz=timezone.utc
+            )
 
         return PriceQuote(
             exchange="binance",
@@ -121,7 +135,10 @@ class BinanceRestClient:
 
     def __init__(self, contract_type: str, interval: str) -> None:
         if contract_type not in self._BASE_URLS:
-            raise ValueError(f"Unsupported Binance contract_type for REST backfill: {contract_type}")
+            raise ValueError(
+                f"Unsupported Binance contract_type for REST backfill: {contract_type}"
+            )
+        self._logger = LOGGER
         self._contract_type = contract_type
         self._base_url = self._BASE_URLS[contract_type]
         self._interval = interval
@@ -138,7 +155,7 @@ class BinanceRestClient:
                 params={
                     "symbol": symbol,
                     "interval": self._interval,
-                    "limit": 1,
+                    "limit": "1",
                 },
             )
             for symbol in symbols_list
@@ -147,7 +164,12 @@ class BinanceRestClient:
 
         candles: list[PriceQuote] = []
         for symbol, response in zip(symbols_list, responses, strict=False):
-            if isinstance(response, Exception):
+            if isinstance(response, BaseException):
+                self._logger.warning(
+                    "Binance REST request failed",
+                    extra={"symbol": symbol, "contract_type": self._contract_type},
+                    exc_info=isinstance(response, Exception),
+                )
                 continue
             try:
                 response.raise_for_status()
@@ -156,7 +178,9 @@ class BinanceRestClient:
                     continue
                 candle = data[0]
                 close_time = candle[6]
-                timestamp = datetime.fromtimestamp(int(close_time) / 1000, tz=timezone.utc)
+                timestamp = datetime.fromtimestamp(
+                    int(close_time) / 1000, tz=timezone.utc
+                )
                 open_price = float(candle[1])
                 high_price = float(candle[2])
                 low_price = float(candle[3])
@@ -179,5 +203,10 @@ class BinanceRestClient:
                     )
                 )
             except Exception:
+                self._logger.warning(
+                    "Failed to parse Binance REST candle",
+                    extra={"symbol": symbol, "contract_type": self._contract_type},
+                    exc_info=True,
+                )
                 continue
         return candles

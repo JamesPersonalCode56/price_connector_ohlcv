@@ -95,27 +95,41 @@ def get_settings() -> Settings:
         stream_idle_timeout=_get_float("CONNECTOR_STREAM_IDLE_TIMEOUT", 10.0),
         max_symbol_per_ws=_get_int("CONNECTOR_MAX_SYMBOL_PER_WS", 50),
         # Circuit breaker
-        circuit_breaker_failure_threshold=_get_int("CONNECTOR_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
-        circuit_breaker_recovery_timeout=_get_float("CONNECTOR_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", 30.0),
-        circuit_breaker_half_open_calls=_get_int("CONNECTOR_CIRCUIT_BREAKER_HALF_OPEN_CALLS", 1),
+        circuit_breaker_failure_threshold=_get_int(
+            "CONNECTOR_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5
+        ),
+        circuit_breaker_recovery_timeout=_get_float(
+            "CONNECTOR_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", 30.0
+        ),
+        circuit_breaker_half_open_calls=_get_int(
+            "CONNECTOR_CIRCUIT_BREAKER_HALF_OPEN_CALLS", 1
+        ),
         # Queues
         closed_queue_maxsize=_get_int("CONNECTOR_CLOSED_QUEUE_MAXSIZE", 1000),
-        open_queue_maxsize=_get_int("CONNECTOR_OPEN_QUEUE_MAXSIZE", 0) or None,  # 0 = unbounded
+        open_queue_maxsize=_get_int("CONNECTOR_OPEN_QUEUE_MAXSIZE", 0)
+        or None,  # 0 = unbounded
         # Deduplication
-        deduplication_window_seconds=_get_float("CONNECTOR_DEDUPLICATION_WINDOW_SECONDS", 120.0),
-        deduplication_max_entries=_get_int("CONNECTOR_DEDUPLICATION_MAX_ENTRIES", 10000),
+        deduplication_window_seconds=_get_float(
+            "CONNECTOR_DEDUPLICATION_WINDOW_SECONDS", 120.0
+        ),
+        deduplication_max_entries=_get_int(
+            "CONNECTOR_DEDUPLICATION_MAX_ENTRIES", 10000
+        ),
         # Connection pooling
         rest_pool_connections=_get_int("CONNECTOR_REST_POOL_CONNECTIONS", 10),
         rest_pool_maxsize=_get_int("CONNECTOR_REST_POOL_MAXSIZE", 20),
     )
 
     ws_server = WsServerSettings(
-        host=_get_str("CONNECTOR_WSS_HOST", "0.0.0.0"),
+        host=_get_str("CONNECTOR_WSS_HOST", "127.0.0.1"),
         port=_get_int("CONNECTOR_WSS_PORT", 8765),
         log_level=_get_str("CONNECTOR_WSS_LOG_LEVEL", "INFO"),
         subscribe_timeout=_get_float("CONNECTOR_WSS_SUBSCRIBE_TIMEOUT", 10.0),
         health_check_port=_get_int("CONNECTOR_WSS_HEALTH_CHECK_PORT", 8766),
-        health_check_enabled=_get_str("CONNECTOR_WSS_HEALTH_CHECK_ENABLED", "true").lower() == "true",
+        health_check_enabled=_get_str(
+            "CONNECTOR_WSS_HEALTH_CHECK_ENABLED", "true"
+        ).lower()
+        == "true",
     )
 
     return Settings(connector=connector, ws_server=ws_server)

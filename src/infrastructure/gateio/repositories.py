@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from infrastructure.common import ContractTypeResolver, RegistryBackedPriceFeedRepository
+from infrastructure.common import (
+    ContractTypeResolver,
+    RegistryBackedPriceFeedRepository,
+)
 
 from .client import GateioClientConfig, GateioWebSocketClient
 
-
-_CONFIG_RESOLVER = ContractTypeResolver(
+_CONFIG_RESOLVER: ContractTypeResolver[GateioClientConfig] = ContractTypeResolver(
     {
         "spot": lambda: GateioClientConfig(
             base_stream_url="wss://api.gateio.ws/ws/v4/",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +17,8 @@ from infrastructure.common import (
     WebSocketClientProtocol,
     WebSocketPriceFeedClient,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _interval_to_seconds(interval: str) -> int:
@@ -84,7 +87,9 @@ class GateioWebSocketClient(WebSocketPriceFeedClient[GateioClientConfig]):
     def _build_connection_args(self, symbols: list[str]) -> dict[str, Any]:
         return {"url": self._resolve_stream_url(symbols)}
 
-    async def _on_connected(self, ws: WebSocketClientProtocol, symbols: list[str]) -> None:
+    async def _on_connected(
+        self, ws: WebSocketClientProtocol, symbols: list[str]
+    ) -> None:
         subscribe_messages = [
             json.dumps(
                 {
@@ -145,7 +150,9 @@ class GateioWebSocketClient(WebSocketPriceFeedClient[GateioClientConfig]):
 
     async def _backfill_quotes(self, symbols: list[str]) -> Iterable[PriceQuote]:
         try:
-            return await self._rest_client.fetch_latest_candles(symbols, self._config.interval)
+            return await self._rest_client.fetch_latest_candles(
+                symbols, self._config.interval
+            )
         except Exception as exc:
             self._logger.exception("Failed to fetch Gate.io REST backfill")
             raise SubscriptionError(
@@ -161,9 +168,13 @@ class GateioWebSocketClient(WebSocketPriceFeedClient[GateioClientConfig]):
         settles = {self._extract_settle_currency(symbol) for symbol in symbols}
         settles.discard("")
         if not settles:
-            raise ValueError("Unable to determine settle currency for Gate.io delivery stream")
+            raise ValueError(
+                "Unable to determine settle currency for Gate.io delivery stream"
+            )
         if len(settles) > 1:
-            raise ValueError("Gate.io delivery stream requires symbols with the same settle currency")
+            raise ValueError(
+                "Gate.io delivery stream requires symbols with the same settle currency"
+            )
 
         settle = settles.pop()
         return base_url.replace("{settle}", settle)
@@ -221,8 +232,12 @@ class GateioWebSocketClient(WebSocketPriceFeedClient[GateioClientConfig]):
         candle_time = entry.get("t")
         timestamp = self._timestamp_from_envelope(message_time_ms, message_time)
         if timestamp is None:
-            timestamp = self._resolve_timestamp(candle_time, message_time, message_time_ms)
-        symbol = self._extract_symbol(entry.get("currency_pair") or entry.get("contract") or entry.get("n"))
+            timestamp = self._resolve_timestamp(
+                candle_time, message_time, message_time_ms
+            )
+        symbol = self._extract_symbol(
+            entry.get("currency_pair") or entry.get("contract") or entry.get("n")
+        )
 
         return PriceQuote(
             exchange="gateio",
@@ -262,7 +277,9 @@ class GateioWebSocketClient(WebSocketPriceFeedClient[GateioClientConfig]):
                 return parts[1]
         return raw_symbol
 
-    def _timestamp_from_envelope(self, message_time_ms: Any, message_time: Any) -> datetime | None:
+    def _timestamp_from_envelope(
+        self, message_time_ms: Any, message_time: Any
+    ) -> datetime | None:
         epoch = _to_epoch_seconds(message_time_ms)
         if epoch is None:
             epoch = _to_epoch_seconds(message_time)
@@ -270,10 +287,14 @@ class GateioWebSocketClient(WebSocketPriceFeedClient[GateioClientConfig]):
             return None
         return datetime.fromtimestamp(epoch, tz=timezone.utc)
 
-    def _resolve_timestamp(self, candle_time: Any, message_time: Any, message_time_ms: Any) -> datetime:
+    def _resolve_timestamp(
+        self, candle_time: Any, message_time: Any, message_time_ms: Any
+    ) -> datetime:
         open_epoch = _to_epoch_seconds(candle_time)
         if open_epoch is not None:
-            return datetime.fromtimestamp(open_epoch + self._interval_seconds, tz=timezone.utc)
+            return datetime.fromtimestamp(
+                open_epoch + self._interval_seconds, tz=timezone.utc
+            )
 
         for value in (message_time_ms, message_time):
             candidate = _to_epoch_seconds(value)
@@ -287,17 +308,25 @@ class GateioRestClient:
     _ENDPOINTS = {
         "spot": ("https://api.gateio.ws/api/v4/spot/candlesticks", "currency_pair"),
         "um": ("https://api.gateio.ws/api/v4/futures/usdt/candlesticks", "contract"),
-        "cm": ("https://api.gateio.ws/api/v4/futures/{settle}/candlesticks", "contract"),
+        "cm": (
+            "https://api.gateio.ws/api/v4/futures/{settle}/candlesticks",
+            "contract",
+        ),
     }
 
     def __init__(self, contract_type: str) -> None:
         if contract_type not in self._ENDPOINTS:
-            raise ValueError(f"Unsupported Gate.io contract_type for REST backfill: {contract_type}")
+            raise ValueError(
+                f"Unsupported Gate.io contract_type for REST backfill: {contract_type}"
+            )
+        self._logger = LOGGER
         self._contract_type = contract_type
         self._base_url, self._symbol_param = self._ENDPOINTS[contract_type]
         self._requires_settle = contract_type == "cm"
 
-    async def fetch_latest_candles(self, symbols: Iterable[str], interval: str) -> list[PriceQuote]:
+    async def fetch_latest_candles(
+        self, symbols: Iterable[str], interval: str
+    ) -> list[PriceQuote]:
         symbols_list = list(symbols)
         if not symbols_list:
             return []
@@ -307,10 +336,10 @@ class GateioRestClient:
             tasks = []
             for symbol in symbols_list:
                 base_url = self._resolve_base_url(symbol)
-                params = {
+                params: dict[str, str] = {
                     self._symbol_param: symbol,
                     "interval": interval,
-                    "limit": 1,
+                    "limit": "1",
                 }
                 tasks.append(
                     client.get(
@@ -322,7 +351,12 @@ class GateioRestClient:
 
         candles: list[PriceQuote] = []
         for symbol, response in zip(symbols_list, responses, strict=False):
-            if isinstance(response, Exception):
+            if isinstance(response, BaseException):
+                self._logger.warning(
+                    "Gate.io REST request failed",
+                    extra={"symbol": symbol, "contract_type": self._contract_type},
+                    exc_info=isinstance(response, Exception),
+                )
                 continue
             try:
                 response.raise_for_status()
@@ -333,7 +367,15 @@ class GateioRestClient:
                 parsed = self._parse_entry(entry_raw, interval_seconds)
                 if parsed is None:
                     continue
-                timestamp, open_price, high_price, low_price, close_price, volume, is_closed = parsed
+                (
+                    timestamp,
+                    open_price,
+                    high_price,
+                    low_price,
+                    close_price,
+                    volume,
+                    is_closed,
+                ) = parsed
 
                 candles.append(
                     PriceQuote(
@@ -351,6 +393,11 @@ class GateioRestClient:
                     )
                 )
             except Exception:
+                self._logger.warning(
+                    "Failed to parse Gate.io REST candle",
+                    extra={"symbol": symbol, "contract_type": self._contract_type},
+                    exc_info=True,
+                )
                 continue
         return candles
 
@@ -362,7 +409,9 @@ class GateioRestClient:
         return datetime.fromtimestamp(base + interval_seconds, tz=timezone.utc)
 
     @staticmethod
-    def _parse_entry(entry: Any, interval_seconds: int) -> tuple[datetime, float, float, float, float, float, bool] | None:
+    def _parse_entry(
+        entry: Any, interval_seconds: int
+    ) -> tuple[datetime, float, float, float, float, float, bool] | None:
         if isinstance(entry, list):
             if len(entry) < 7:
                 return None
@@ -386,21 +435,41 @@ class GateioRestClient:
                 volume = float(volume_raw)
             except (TypeError, ValueError):
                 volume = 0.0
-            is_closed_raw = entry.get("finished") or entry.get("completed") or entry.get("is_closed")
-            is_closed = str(is_closed_raw).lower() == "true" if is_closed_raw is not None else True
-            timestamp_value = entry.get("t") or entry.get("time") or entry.get("timestamp")
+            is_closed_raw = (
+                entry.get("finished")
+                or entry.get("completed")
+                or entry.get("is_closed")
+            )
+            is_closed = (
+                str(is_closed_raw).lower() == "true"
+                if is_closed_raw is not None
+                else True
+            )
+            timestamp_value = (
+                entry.get("t") or entry.get("time") or entry.get("timestamp")
+            )
         else:
             return None
 
         timestamp = GateioRestClient._parse_timestamp(timestamp_value, interval_seconds)
-        return timestamp, open_price, high_price, low_price, close_price, volume, is_closed
+        return (
+            timestamp,
+            open_price,
+            high_price,
+            low_price,
+            close_price,
+            volume,
+            is_closed,
+        )
 
     def _resolve_base_url(self, symbol: str) -> str:
         if not self._requires_settle:
             return self._base_url
         settle = self._extract_settle_currency(symbol)
         if not settle:
-            raise ValueError(f"Unable to determine settle currency for Gate.io REST symbol '{symbol}'")
+            raise ValueError(
+                f"Unable to determine settle currency for Gate.io REST symbol '{symbol}'"
+            )
         return self._base_url.format(settle=settle)
 
     @staticmethod

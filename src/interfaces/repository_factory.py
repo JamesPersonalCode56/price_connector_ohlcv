@@ -8,7 +8,9 @@ from infrastructure.hyperliquid.repositories import HyperliquidPriceFeedReposito
 from infrastructure.okx.repositories import OkxPriceFeedRepository
 
 
-def build_price_feed_repository(exchange: str, contract_type: str | None) -> PriceFeedRepository:
+def build_price_feed_repository(
+    exchange: str, contract_type: str | None
+) -> PriceFeedRepository:
     """Factory to construct the correct repository implementation for an exchange."""
     normalized_contract_type = (contract_type or "").lower() if contract_type else None
     if exchange == "binance":

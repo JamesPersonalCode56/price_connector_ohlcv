@@ -6,9 +6,8 @@ Provides both structured logging metrics and Prometheus-compatible metrics.
 from __future__ import annotations
 
 import logging
-import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Lock
 from typing import DefaultDict
@@ -161,7 +160,9 @@ class MetricsCollector:
             },
         )
 
-    def record_connection(self, exchange: str, contract_type: str, active: bool) -> None:
+    def record_connection(
+        self, exchange: str, contract_type: str, active: bool
+    ) -> None:
         """Record connection state change."""
         delta = 1 if active else -1
 
@@ -311,7 +312,11 @@ class MetricsCollector:
 
         self._logger.warning(
             f"Circuit breaker state changed to {state}",
-            extra={"exchange": exchange, "contract_type": contract_type, "state": state},
+            extra={
+                "exchange": exchange,
+                "contract_type": contract_type,
+                "state": state,
+            },
         )
 
     def record_duplicate(self, exchange: str, contract_type: str) -> None:
