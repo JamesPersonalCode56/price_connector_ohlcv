@@ -19,7 +19,7 @@ import websockets
 DEFAULT_WS_URL = "ws://localhost:8765"
 DEFAULT_LIMIT = 1
 DEFAULT_BATCH_SIZE = 50
-DEFAULT_MESSAGE_TIMEOUT = 15.0
+DEFAULT_MESSAGE_TIMEOUT = 30.0
 
 BinanceSymbolMap = Mapping[str, list[str]]
 BybitSymbolMap = Mapping[str, list[str]]
@@ -385,7 +385,19 @@ async def run_subscription(
 
                 if message.get("type") == "error":
                     raise build_error_from_payload(message, job)
-                if message.get("type") != "quote":
+                quote_symbol = None
+                quote_close = None
+                quote_timestamp = None
+                if message.get("type") == "quote":
+                    quote_symbol = message.get("symbol")
+                    quote_close = message.get("close")
+                    quote_timestamp = message.get("timestamp")
+                elif message.get("e") == "kline":
+                    kline = message.get("k") or {}
+                    quote_symbol = message.get("s") or kline.get("s")
+                    quote_close = kline.get("c")
+                    quote_timestamp = kline.get("T") or kline.get("t")
+                else:
                     continue
 
                 received += 1
@@ -393,8 +405,8 @@ async def run_subscription(
                     print(
                         f"[{job.exchange}::{job.contract_type or 'default'}] "
                         f"Batch {job.batch_index}/{job.batch_total}: first quote "
-                        f"{message.get('symbol')} close={message.get('close')} "
-                        f"@ {message.get('timestamp')}"
+                        f"{quote_symbol} close={quote_close} "
+                        f"@ {quote_timestamp}"
                     )
             if timeout_hit and received == 0:
                 return (

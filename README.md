@@ -14,6 +14,9 @@ Kết nối và stream dữ liệu nến (OHLCV) 1 phút thời gian thực từ
 ```bash
 git clone <repo-url>
 cd ohlcv-python-connector
+# Tạo môi trường ảo (khuyến nghị)
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 # Pip
 pip install -r requirements.txt
 # Hoặc Poetry
@@ -23,18 +26,6 @@ poetry install
 Yêu cầu: Python 3.10+, kết nối mạng tới các endpoint REST/WS của sàn.
 
 ## Sử dụng nhanh
-
-### Chạy CLI stream trực tiếp
-```bash
-# Binance spot
-poetry run connector-cli binance BTCUSDT ETHUSDT --market spot --limit 10
-# OKX swap
-poetry run connector-cli okx BTC-USDT-SWAP ETH-USDT-SWAP --limit 10
-# Bybit linear
-poetry run connector-cli bybit BTCUSDT ETHUSDT --market linear --limit 10
-# Gate.io spot
-poetry run connector-cli gateio BTC_USDT ETH_USDT --market spot --limit 10
-```
 
 ### Chạy WebSocket server
 ```bash

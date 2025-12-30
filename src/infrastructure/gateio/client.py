@@ -352,11 +352,20 @@ class GateioRestClient:
         candles: list[PriceQuote] = []
         for symbol, response in zip(symbols_list, responses, strict=False):
             if isinstance(response, BaseException):
-                self._logger.warning(
-                    "Gate.io REST request failed",
-                    extra={"symbol": symbol, "contract_type": self._contract_type},
-                    exc_info=isinstance(response, Exception),
-                )
+                extra = {
+                    "symbol": symbol,
+                    "contract_type": self._contract_type,
+                    "error": str(response),
+                    "error_type": type(response).__name__,
+                }
+                if isinstance(response, httpx.TimeoutException):
+                    self._logger.warning("Gate.io REST request timed out", extra=extra)
+                else:
+                    self._logger.warning(
+                        "Gate.io REST request failed",
+                        extra=extra,
+                        exc_info=response if isinstance(response, Exception) else False,
+                    )
                 continue
             try:
                 response.raise_for_status()

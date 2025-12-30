@@ -130,6 +130,10 @@ class WebSocketPriceFeedClient(ABC, Generic[TConfig]):
                 raise
             except SubscriptionError:
                 raise
+            except asyncio.TimeoutError:
+                self._logger.warning(
+                    "%s WebSocket connection timed out; retrying", self.exchange
+                )
             except Exception:
                 self._logger.exception(self._connection_error_message())
 

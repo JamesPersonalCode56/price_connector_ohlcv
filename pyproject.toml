@@ -32,7 +32,6 @@ namespace_packages = true
 explicit_package_bases = true
 
 [tool.poetry.scripts]
-connector-cli = "interfaces.cli.main:main"
 connector-wss = "interfaces.ws_server.main:main"
 
 [build-system]

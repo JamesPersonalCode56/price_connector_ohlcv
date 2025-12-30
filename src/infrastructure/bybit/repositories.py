@@ -4,21 +4,24 @@ from infrastructure.common import (
     ContractTypeResolver,
     RegistryBackedPriceFeedRepository,
 )
+from infrastructure.exchange_config import EXCHANGE_WS_ENDPOINTS
 
 from .client import BybitClientConfig, BybitWebSocketClient
+
+_BYBIT_CONFIG = EXCHANGE_WS_ENDPOINTS["bybit"]
 
 _CONFIG_RESOLVER: ContractTypeResolver[BybitClientConfig] = ContractTypeResolver(
     {
         "spot": lambda: BybitClientConfig(
-            base_stream_url="wss://stream.bybit.com/v5/public/spot",
+            base_stream_url=_BYBIT_CONFIG["spot"].base_stream_url,
             contract_type="spot",
         ),
         "linear": lambda: BybitClientConfig(
-            base_stream_url="wss://stream.bybit.com/v5/public/linear",
+            base_stream_url=_BYBIT_CONFIG["linear"].base_stream_url,
             contract_type="linear",
         ),
         "inverse": lambda: BybitClientConfig(
-            base_stream_url="wss://stream.bybit.com/v5/public/inverse",
+            base_stream_url=_BYBIT_CONFIG["inverse"].base_stream_url,
             contract_type="inverse",
         ),
     },

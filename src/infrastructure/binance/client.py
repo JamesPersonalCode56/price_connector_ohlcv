@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
+import httpx
+
 try:
     import orjson as json
 except ImportError:
@@ -28,7 +30,10 @@ class BinanceWsConfig:
         streams = "/".join(
             f"{symbol.lower()}@kline_{self.interval}" for symbol in symbols
         )
-        return f"{self.base_stream_url}/stream?streams={streams}"
+        base = self.base_stream_url
+        if base.endswith("/ws"):
+            base = base[: -len("/ws")]
+        return f"{base}/stream?streams={streams}"
 
 
 class BinanceWebSocketClient(WebSocketPriceFeedClient[BinanceWsConfig]):
@@ -165,11 +170,20 @@ class BinanceRestClient:
         candles: list[PriceQuote] = []
         for symbol, response in zip(symbols_list, responses, strict=False):
             if isinstance(response, BaseException):
-                self._logger.warning(
-                    "Binance REST request failed",
-                    extra={"symbol": symbol, "contract_type": self._contract_type},
-                    exc_info=isinstance(response, Exception),
-                )
+                extra = {
+                    "symbol": symbol,
+                    "contract_type": self._contract_type,
+                    "error": str(response),
+                    "error_type": type(response).__name__,
+                }
+                if isinstance(response, httpx.TimeoutException):
+                    self._logger.warning("Binance REST request timed out", extra=extra)
+                else:
+                    self._logger.warning(
+                        "Binance REST request failed",
+                        extra=extra,
+                        exc_info=response if isinstance(response, Exception) else False,
+                    )
                 continue
             try:
                 response.raise_for_status()

@@ -11,6 +11,13 @@ from config import SETTINGS
 # Global connection pool per exchange
 _http_clients: Dict[str, httpx.AsyncClient] = {}
 
+try:
+    import h2  # type: ignore  # noqa: F401
+
+    _HTTP2_AVAILABLE = True
+except Exception:
+    _HTTP2_AVAILABLE = False
+
 
 def get_http_client(exchange: str) -> httpx.AsyncClient:
     """
@@ -29,7 +36,7 @@ def get_http_client(exchange: str) -> httpx.AsyncClient:
                 max_connections=SETTINGS.connector.rest_pool_maxsize,
                 max_keepalive_connections=SETTINGS.connector.rest_pool_connections,
             ),
-            http2=True,  # Enable HTTP/2 for better performance
+            http2=_HTTP2_AVAILABLE,  # Use HTTP/2 only when h2 is installed
         )
 
     return _http_clients[exchange]

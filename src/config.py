@@ -65,6 +65,9 @@ class ConnectorSettings:
     # Connection pooling
     rest_pool_connections: int
     rest_pool_maxsize: int
+    max_connections_per_exchange: int
+    router_queue_maxsize: int
+    default_interval: str
 
 
 @dataclass(frozen=True)
@@ -87,12 +90,12 @@ class Settings:
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     connector = ConnectorSettings(
-        inactivity_timeout=_get_float("CONNECTOR_INACTIVITY_TIMEOUT", 3.0),
+        inactivity_timeout=_get_float("CONNECTOR_INACTIVITY_TIMEOUT", 5.0),
         reconnect_delay=_get_float("CONNECTOR_RECONNECT_DELAY", 1.0),
         rest_timeout=_get_float("CONNECTOR_REST_TIMEOUT", 5.0),
         ws_ping_interval=_get_float("CONNECTOR_WS_PING_INTERVAL", 20.0),
         ws_ping_timeout=_get_float("CONNECTOR_WS_PING_TIMEOUT", 20.0),
-        stream_idle_timeout=_get_float("CONNECTOR_STREAM_IDLE_TIMEOUT", 10.0),
+        stream_idle_timeout=_get_float("CONNECTOR_STREAM_IDLE_TIMEOUT", 30.0),
         max_symbol_per_ws=_get_int("CONNECTOR_MAX_SYMBOL_PER_WS", 50),
         # Circuit breaker
         circuit_breaker_failure_threshold=_get_int(
@@ -118,6 +121,11 @@ def get_settings() -> Settings:
         # Connection pooling
         rest_pool_connections=_get_int("CONNECTOR_REST_POOL_CONNECTIONS", 10),
         rest_pool_maxsize=_get_int("CONNECTOR_REST_POOL_MAXSIZE", 20),
+        max_connections_per_exchange=_get_int(
+            "CONNECTOR_MAX_CONN_PER_EXCHANGE", 0
+        ),
+        router_queue_maxsize=_get_int("CONNECTOR_ROUTER_QUEUE_MAXSIZE", 1000),
+        default_interval=_get_str("CONNECTOR_DEFAULT_INTERVAL", "1m"),
     )
 
     ws_server = WsServerSettings(

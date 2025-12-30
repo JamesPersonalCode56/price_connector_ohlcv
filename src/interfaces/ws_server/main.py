@@ -9,13 +9,18 @@ from typing import Any, cast
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-from application.use_cases.stream_prices import StreamPrices
 from config import SETTINGS
+from domain.errors import ErrorCode, error_payload
 from infrastructure.common.client import SubscriptionError
 from infrastructure.common.rest_pool import close_all_clients
 from infrastructure.common.shutdown import get_shutdown_handler
 from interfaces.health_server import create_health_server
-from interfaces.repository_factory import build_price_feed_repository
+from infrastructure.exchange_config import EXCHANGE_WS_ENDPOINTS
+from interfaces.ws_server.router import (
+    ROUTER,
+    ConnectionPoolBusyError,
+    QueueBackpressureError,
+)
 
 try:
     import orjson as json_lib  # type: ignore[import-not-found]
@@ -77,6 +82,7 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
     except asyncio.TimeoutError:
         await _send_error(
             websocket,
+            ErrorCode.WS_STREAM_TIMEOUT,
             f"No subscription payload received within {SETTINGS.ws_server.subscribe_timeout:.0f} seconds",
         )
         return
@@ -86,15 +92,25 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
     try:
         payload = loads(raw)
     except Exception:
-        await _send_error(websocket, "Subscription payload must be valid JSON")
+        await _send_error(
+            websocket,
+            ErrorCode.WS_PROTOCOL_ERROR,
+            "Subscription payload must be valid JSON",
+        )
         return
 
+    exchange_hint = payload.get("exchange") if isinstance(payload, dict) else None
     try:
         exchange, symbols, contract_type, limit = _validate_subscription_payload(
             payload
         )
     except ValueError as exc:
-        await _send_error(websocket, str(exc), exchange=exchange)
+        await _send_error(
+            websocket,
+            ErrorCode.WS_SUBSCRIBE_REJECTED,
+            str(exc),
+            exchange=exchange_hint if isinstance(exchange_hint, str) else None,
+        )
         return
 
     LOGGER.info(
@@ -106,14 +122,6 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
             "limit": limit,
         },
     )
-    try:
-        repository = build_price_feed_repository(exchange, contract_type)
-    except ValueError as exc:
-        await _send_error(
-            websocket, str(exc), exchange=exchange, contract_type=contract_type
-        )
-        return
-
     await websocket.send(
         dumps(
             {
@@ -126,8 +134,38 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
         )
     )
 
-    use_case = StreamPrices(repository)
-    stream = use_case.execute(symbols)
+    interval = _resolve_interval(exchange, contract_type)
+    try:
+        stream = await ROUTER.subscribe(exchange, contract_type, symbols)
+    except ConnectionPoolBusyError as exc:
+        await _send_error(
+            websocket,
+            ErrorCode.CONNECTION_POOL_BUSY,
+            str(exc),
+            exchange=exchange,
+            contract_type=contract_type,
+            symbols=symbols,
+        )
+        return
+    except ValueError as exc:
+        await _send_error(
+            websocket,
+            ErrorCode.UNSUPPORTED_CONTRACT_TYPE,
+            str(exc),
+            exchange=exchange,
+            contract_type=contract_type,
+        )
+        return
+    except ConnectionError as exc:
+        await _send_error(
+            websocket,
+            ErrorCode.WS_CONNECT_FAILED,
+            str(exc),
+            exchange=exchange,
+            contract_type=contract_type,
+            symbols=symbols,
+        )
+        return
     counter = 0
 
     try:
@@ -142,6 +180,7 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
             except asyncio.TimeoutError:
                 await _send_error(
                     websocket,
+                    ErrorCode.WS_STREAM_TIMEOUT,
                     (
                         f"No quotes received for {SETTINGS.connector.stream_idle_timeout:.0f} seconds "
                         f"from {exchange}::{contract_type or 'default'}. Subscription cancelled."
@@ -152,8 +191,10 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
                 )
                 break
             except SubscriptionError as exc:
+                code = _map_subscription_error_code(exc)
                 await _send_error(
                     websocket,
+                    code,
                     "Subscription rejected by exchange",
                     exchange=exchange,
                     contract_type=contract_type,
@@ -161,22 +202,21 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
                     exchange_message=exc.exchange_message or str(exc),
                 )
                 break
+            except QueueBackpressureError as exc:
+                await _send_error(
+                    websocket,
+                    ErrorCode.INTERNAL_QUEUE_BACKPRESSURE,
+                    str(exc),
+                    exchange=exchange,
+                    contract_type=contract_type,
+                    symbols=symbols,
+                )
+                break
 
-            response = {
-                "type": "quote",
-                "current_time": str(datetime.now(timezone.utc)),
-                "timestamp": quote.timestamp.astimezone(timezone.utc).isoformat(),
-                "exchange": quote.exchange,
-                "symbol": quote.symbol,
-                "contract_type": quote.contract_type,
-                "open": quote.open,
-                "high": quote.high,
-                "low": quote.low,
-                "close": quote.close,
-                "volume": quote.volume,
-                "trade_num": quote.trade_num,
-                "is_closed_candle": quote.is_closed_candle,
-            }
+            response = quote.to_kline_event(
+                event_time=datetime.now(timezone.utc),
+                interval=interval,
+            )
             await websocket.send(dumps(response))
 
             if limit > 0:
@@ -189,6 +229,7 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
         LOGGER.exception("Unexpected error while streaming quotes")
         await _send_error(
             websocket,
+            ErrorCode.UNKNOWN,
             f"Internal streaming error: {exc}",
             exchange=exchange,
             contract_type=contract_type,
@@ -232,8 +273,29 @@ def _validate_subscription_payload(
     return exchange, symbols_raw, contract_type, limit
 
 
+def _map_subscription_error_code(error: SubscriptionError) -> ErrorCode:
+    message = (error.exchange_message or str(error)).lower()
+    if "rate limit" in message or "ratelimit" in message:
+        return ErrorCode.RATE_LIMITED
+    if "backfill" in message or "rest" in message:
+        return ErrorCode.REST_BACKFILL_FAILED
+    if "symbol" in message:
+        return ErrorCode.INVALID_SYMBOL
+    return ErrorCode.WS_SUBSCRIBE_REJECTED
+
+
+def _resolve_interval(exchange: str, contract_type: str | None) -> str:
+    if contract_type:
+        config = EXCHANGE_WS_ENDPOINTS.get(exchange, {}).get(contract_type)
+        if config:
+            return config.default_interval
+    default = SETTINGS.connector.default_interval
+    return default
+
+
 async def _send_error(
     websocket: websockets.WebSocketServerProtocol,
+    code: ErrorCode,
     system_message: str,
     *,
     exchange: str | None = None,
@@ -242,19 +304,14 @@ async def _send_error(
     exchange_message: str | None = None,
 ) -> None:
     try:
-        payload: dict[str, Any] = {
-            "type": "error",
-            "message": system_message,
-            "system_message": system_message,
-        }
-        if exchange is not None:
-            payload["exchange"] = exchange
-        if contract_type is not None:
-            payload["contract_type"] = contract_type
-        if symbols is not None:
-            payload["symbols"] = symbols
-        if exchange_message:
-            payload["exchange_message"] = exchange_message
+        payload = error_payload(
+            code,
+            system_message,
+            exchange=exchange,
+            contract_type=contract_type,
+            symbols=symbols,
+            exchange_message=exchange_message,
+        )
         await websocket.send(dumps(payload))
     except ConnectionClosed:
         pass

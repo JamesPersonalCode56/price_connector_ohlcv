@@ -4,22 +4,28 @@ from infrastructure.common import (
     ContractTypeResolver,
     RegistryBackedPriceFeedRepository,
 )
+from infrastructure.exchange_config import EXCHANGE_WS_ENDPOINTS
 
 from .client import BinanceWebSocketClient, BinanceWsConfig
+
+_BINANCE_CONFIG = EXCHANGE_WS_ENDPOINTS["binance"]
 
 _CONFIG_RESOLVER: ContractTypeResolver[BinanceWsConfig] = ContractTypeResolver(
     {
         "spot": lambda: BinanceWsConfig(
             contract_type="spot",
-            base_stream_url="wss://stream.binance.com:9443",
+            base_stream_url=_BINANCE_CONFIG["spot"].base_stream_url,
+            interval=_BINANCE_CONFIG["spot"].default_interval,
         ),
         "usdm": lambda: BinanceWsConfig(
             contract_type="usdm",
-            base_stream_url="wss://fstream.binance.com",
+            base_stream_url=_BINANCE_CONFIG["usdm"].base_stream_url,
+            interval=_BINANCE_CONFIG["usdm"].default_interval,
         ),
         "coinm": lambda: BinanceWsConfig(
             contract_type="coinm",
-            base_stream_url="wss://dstream.binance.com",
+            base_stream_url=_BINANCE_CONFIG["coinm"].base_stream_url,
+            interval=_BINANCE_CONFIG["coinm"].default_interval,
         ),
     },
     aliases={

@@ -4,25 +4,31 @@ from infrastructure.common import (
     ContractTypeResolver,
     RegistryBackedPriceFeedRepository,
 )
+from infrastructure.exchange_config import EXCHANGE_WS_ENDPOINTS
 
 from .client import GateioClientConfig, GateioWebSocketClient
+
+_GATEIO_CONFIG = EXCHANGE_WS_ENDPOINTS["gateio"]
 
 _CONFIG_RESOLVER: ContractTypeResolver[GateioClientConfig] = ContractTypeResolver(
     {
         "spot": lambda: GateioClientConfig(
-            base_stream_url="wss://api.gateio.ws/ws/v4/",
+            base_stream_url=_GATEIO_CONFIG["spot"].base_stream_url,
             channel="spot.candlesticks",
             contract_type="spot",
+            interval=_GATEIO_CONFIG["spot"].default_interval,
         ),
         "um": lambda: GateioClientConfig(
-            base_stream_url="wss://fx-ws.gateio.ws/v4/ws/usdt",
+            base_stream_url=_GATEIO_CONFIG["um"].base_stream_url,
             channel="futures.candlesticks",
             contract_type="um",
+            interval=_GATEIO_CONFIG["um"].default_interval,
         ),
         "cm": lambda: GateioClientConfig(
-            base_stream_url="wss://fx-ws.gateio.ws/v4/ws/{settle}",
+            base_stream_url=_GATEIO_CONFIG["cm"].base_stream_url,
             channel="futures.candlesticks",
             contract_type="cm",
+            interval=_GATEIO_CONFIG["cm"].default_interval,
         ),
     },
     aliases={

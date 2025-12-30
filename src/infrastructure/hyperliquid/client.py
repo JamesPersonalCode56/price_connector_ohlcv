@@ -39,12 +39,15 @@ def _to_int(value: Any) -> int:
 @dataclass
 class HyperliquidWsConfig:
     base_api_url: str = "https://api.hyperliquid.xyz"
+    base_ws_url: str | None = None
     interval: str = "1m"
     market_type: str = "perp"  # "spot" or "perp"
     contract_type: str = "usdm"
 
     @property
     def stream_url(self) -> str:
+        if self.base_ws_url:
+            return self.base_ws_url
         if self.base_api_url.startswith("https://"):
             return "wss://" + self.base_api_url[len("https://") :] + "/ws"
         if self.base_api_url.startswith("http://"):
