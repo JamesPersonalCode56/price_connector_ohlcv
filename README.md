@@ -55,15 +55,15 @@ curl http://localhost:8766/metrics
 ## Kiểm thử
 
 - Smoke test nhập khẩu: `python test_imports.py`
-- Test từng sàn: `poetry run python test/test_<exchange>_*.py`
-- Test batch toàn bộ symbol: `PYTHONPATH=src poetry run python test/run_all_ws_subscriptions.py --batch-size 100 --limit 1 --concurrency 10 --message-timeout 20`
+- Test từng sàn: `poetry run python tests/integration/test_<exchange>_*.py`
+- Test batch toàn bộ symbol: `PYTHONPATH=src poetry run python tests/load/run_all_ws_subscriptions.py --batch-size 100 --limit 1 --concurrency 10 --message-timeout 20`
 
 ## Cấu trúc dự án
 
 ```
 ohlcv-python-connector/
 ├── src/                 # Mã nguồn chính (config, domain, application, infrastructure, interfaces)
-├── test/                # Test đơn lẻ và script integration WS
+├── tests/               # Unit, integration, load tests
 ├── docs/                # Tài liệu chi tiết (Quickstart, Upgrade, Deployment, Mapping, Changelog, ...)
 ├── requirements.txt / pyproject.toml / poetry.lock
 ├── start.sh
@@ -400,10 +400,10 @@ spec:
 poetry run pytest
 
 # Specific exchange test
-poetry run python test/test_binance_btc_spot.py
+poetry run python tests/integration/test_binance_btc_spot.py
 
 # Batch test all exchanges
-poetry run python test/run_all_ws_subscriptions.py \
+poetry run python tests/load/run_all_ws_subscriptions.py \
   --batch-size 100 \
   --limit 60 \
   --concurrency 24
