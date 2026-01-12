@@ -15,7 +15,6 @@ async def stream_quotes() -> None:
         "exchange": "binance",
         "contract_type": "coinm",  # Server still accepts "market" but internally converts to contract_type
         "symbols": ["BTCUSD_PERP"],
-        # "limit": 5,
     }
 
     async with websockets.connect(url) as websocket:
